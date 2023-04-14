@@ -246,6 +246,7 @@
 #define IDS_USAGE_PERCENTAGE            339
 #define IDD_SELECT_CONNECTIONS_DIALOG   339
 #define IDS_MEMORY_USED                 340
+#define IDD_TASK_BAR_DIALOG_NOREDIRECTIONBITMAP 340
 #define IDS_MEMORY_AVAILABLE            341
 #define IDS_DOTNET_NOT_INSTALLED_TIP    342
 #define IDS_VERSION_UPDATE              343
@@ -290,6 +291,10 @@
 #define IDS_AUTO_RUN_METHOD_TASK_SCHEDULE 382
 #define IDS_PATH                        383
 #define IDS_SET_AUTO_RUN_FAILED_WARNING 384
+#define IDS_UPDATE_TASKBARDLG_FAILED_TIP 385
+#define IDS_D2DDRAWCOMMON_ERROR_TIP     386
+#define IDS_PLUGIN_OPTIONS              387
+#define IDS_PLUGIN_DETAILS              388
 #define IDC_STATIC_INFO                 1001
 #define IDC_STATIC1                     1002
 #define IDC_STATIC_DOWN                 1002
@@ -502,8 +507,15 @@
 #define IDC_OPEN_PLUGIN_DIR_STATIC      1160
 #define IDC_OPEN_SKIN_DIR_STATIC        1161
 #define IDC_RESET_AUTO_RUN_BUTTON       1162
-#define IDS_CPU_FREQ					1163
-
+#define IDS_CPU_FREQ                    1163
+#define IDC_WINDOW_OFFSET_TOP_NEGATIVE_CHECK      1166
+#define IDC_WINDOW_OFFSET_TOP_EDIT      1167
+#define IDC_VERTICAL_MARGIN_EDIT      1168
+#define IDC_VERTICAL_MARGIN_NEGATIVE_CHECK      1169
+#define ID_32771                        32771
+#define IDC_DISABLE_D2D                 1170
+#define IDC_GDI_RADIO                   1171
+#define IDC_D2D_RADIO                   1172
 #define ID_32771                        32771
 #define ID_NETWORK_INFO                 32772
 #define ID_32773                        32773
@@ -614,14 +626,19 @@
 #define ID_OPEN_TASK_MANAGER            33403
 #define ID_REFRESH_CONNECTION_LIST      33404
 #define ID_DISPLAY_SETTINGS             33405
+#define ID_PLUGIN_DETAIL_TASKBAR        33406
+#define ID_PLUGIN_OPTIONS_TASKBAR       33407
+#define ID_PLUGIN_COMMAND_START         33408
+#define ID_PLUGIN_COMMAND_MAX           33664
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        341
-#define _APS_NEXT_COMMAND_VALUE         33406
-#define _APS_NEXT_CONTROL_VALUE         1166
+#define _APS_NEXT_COMMAND_VALUE         33665
+
+#define _APS_NEXT_CONTROL_VALUE         1173
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

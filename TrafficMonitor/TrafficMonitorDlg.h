@@ -31,6 +31,9 @@ class CTrafficMonitorDlg : public CDialog
 public:
     CTrafficMonitorDlg(CWnd* pParent = NULL);   // 标准构造函数
     ~CTrafficMonitorDlg();
+    CTaskBarDlg* GetTaskbarWindow() const;
+
+    static CTrafficMonitorDlg* Instance();
 
     // 对话框数据
 #ifdef AFX_DESIGN_TIME
@@ -248,4 +251,11 @@ public:
     afx_msg void OnDisplaySettings();
     afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
     afx_msg void OnRefreshConnectionList();
+protected:
+    afx_msg LRESULT OnTabletQuerysystemgesturestatus(WPARAM wParam, LPARAM lParam);
+public:
+    afx_msg void OnPluginOptions();
+    afx_msg void OnPluginDetail();
+    afx_msg void OnPluginOptionsTaksbar();
+    afx_msg void OnPluginDetailTaksbar();
 };

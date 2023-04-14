@@ -10,6 +10,9 @@
 #include "PluginManagerDlg.h"
 #include "SetItemOrderDlg.h"
 #include "WindowsSettingHelper.h"
+#include "PluginInfoDlg.h"
+#include "WIC.h"
+#include "SupportedRenderEnums.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -40,6 +43,19 @@ CTrafficMonitorDlg::~CTrafficMonitorDlg()
     }
 
     ::ReleaseDC(NULL, m_desktop_dc);
+}
+
+CTaskBarDlg* CTrafficMonitorDlg::GetTaskbarWindow() const
+{
+    if (IsTaskbarWndValid())
+        return m_tBarDlg;
+    else
+        return nullptr;
+}
+
+CTrafficMonitorDlg* CTrafficMonitorDlg::Instance()
+{
+    return dynamic_cast<CTrafficMonitorDlg*>(theApp.m_pMainWnd);
 }
 
 void CTrafficMonitorDlg::DoDataExchange(CDataExchange* pDX)
@@ -99,6 +115,11 @@ BEGIN_MESSAGE_MAP(CTrafficMonitorDlg, CDialog)
     ON_COMMAND(ID_DISPLAY_SETTINGS, &CTrafficMonitorDlg::OnDisplaySettings)
     ON_WM_LBUTTONUP()
     ON_COMMAND(ID_REFRESH_CONNECTION_LIST, &CTrafficMonitorDlg::OnRefreshConnectionList)
+    ON_MESSAGE(WM_TABLET_QUERYSYSTEMGESTURESTATUS, &CTrafficMonitorDlg::OnTabletQuerysystemgesturestatus)
+    ON_COMMAND(ID_PLUGIN_OPTIONS, &CTrafficMonitorDlg::OnPluginOptions)
+    ON_COMMAND(ID_PLUGIN_DETAIL, &CTrafficMonitorDlg::OnPluginDetail)
+    ON_COMMAND(ID_PLUGIN_OPTIONS_TASKBAR, &CTrafficMonitorDlg::OnPluginOptionsTaksbar)
+    ON_COMMAND(ID_PLUGIN_DETAIL_TASKBAR, &CTrafficMonitorDlg::OnPluginDetailTaksbar)
 END_MESSAGE_MAP()
 
 
@@ -434,8 +455,8 @@ void CTrafficMonitorDlg::IniConnection()
     theApp.m_cfg_data.m_connection_name = GetConnection(m_connection_selected).description_2;
 
     //根据已获取到的连接在菜单中添加相应项目
-    CMenu* select_connection_menu = theApp.m_main_menu.GetSubMenu(0)->GetSubMenu(0);        //设置“选择网络连接”子菜单项
-    IniConnectionMenu(select_connection_menu);      //向“选择网卡”子菜单项添加项目
+    IniConnectionMenu(theApp.m_main_menu.GetSubMenu(0)->GetSubMenu(0));      //向“选择网络连接”子菜单项添加项目
+    IniConnectionMenu(theApp.m_main_menu_plugin.GetSubMenu(0)->GetSubMenu(0));      //向“选择网络连接”子菜单项添加项目
 
     IniTaskBarConnectionMenu();     //初始化任务栏窗口中的“选择网络连接”子菜单项
 
@@ -489,8 +510,9 @@ void CTrafficMonitorDlg::IniConnectionMenu(CMenu* pMenu)
 
 void CTrafficMonitorDlg::IniTaskBarConnectionMenu()
 {
-    CMenu* select_connection_menu = theApp.m_taskbar_menu.GetSubMenu(0)->GetSubMenu(0);     //设置“选择网络连接”子菜单项
-    IniConnectionMenu(select_connection_menu);      //向“选择网卡”子菜单项添加项目
+    //向“选择网络连接”子菜单项添加项目
+    IniConnectionMenu(theApp.m_taskbar_menu.GetSubMenu(0)->GetSubMenu(0));
+    IniConnectionMenu(theApp.m_taskbar_menu_plugin.GetSubMenu(0)->GetSubMenu(0));
 }
 
 void CTrafficMonitorDlg::SetConnectionMenuState(CMenu* pMenu)
@@ -511,13 +533,33 @@ void CTrafficMonitorDlg::CloseTaskBarWnd()
             m_tBarDlg->OnCancel();
         delete m_tBarDlg;
         m_tBarDlg = nullptr;
+        theApp.m_taskbar_data.update_layered_window_error_code = 0;
     }
 }
 
 void CTrafficMonitorDlg::OpenTaskBarWnd()
 {
     m_tBarDlg = new CTaskBarDlg;
-    m_tBarDlg->Create(IDD_TASK_BAR_DIALOG, this);
+
+    CSupportedRenderEnums supported_render_enums{};
+    // 强制初始化theApp.m_is_windows11_taskbar的值
+    CTaskBarDlg::GetShellTrayWndHandleAndSaveWindows11TaskBarExistenceInfoToTheApp();
+    CTaskBarDlg::DisableRenderFeatureIfNecessary(supported_render_enums);
+    auto render_type = supported_render_enums.GetAutoFitEnum();
+    // WS_EX_LAYERED 和 WS_EX_NOREDIRECTIONBITMAP 可以共存，见微软示例代码
+    // https://github.com/microsoft/Windows-classic-samples/blob/7cbd99ac1d2b4a0beffbaba29ea63d024ceff700/Samples/DynamicDPI/cpp/SampleDesktopWindow.cpp#L179
+    // 但是WS_EX_NOREDIRECTIONBITMAP似乎会导致UpdateLayeredWindowIndirect失败
+    switch (render_type)
+    {
+        using namespace DrawCommonHelper;
+    case RenderType::D2D1_WITH_DCOMPOSITION:
+        m_tBarDlg->Create(IDD_TASK_BAR_DIALOG_NOREDIRECTIONBITMAP, this);
+        break;
+    // 包括RenderType::D2D1在内的其他值
+    default:
+        m_tBarDlg->Create(IDD_TASK_BAR_DIALOG, this);
+        break;
+    }
     m_tBarDlg->ShowWindow(SW_SHOW);
     //m_tBarDlg->ShowInfo();
     //IniTaskBarConnectionMenu();
@@ -661,6 +703,7 @@ void CTrafficMonitorDlg::ApplySettings(COptionsDlg& optionsDlg)
     bool is_alow_out_of_border_changed = (optionsDlg.m_tab1_dlg.m_data.m_alow_out_of_border != theApp.m_main_wnd_data.m_alow_out_of_border);
     bool is_show_notify_icon_changed = (optionsDlg.m_tab3_dlg.m_data.show_notify_icon != theApp.m_general_data.show_notify_icon);
     bool is_connections_hide_changed = (optionsDlg.m_tab3_dlg.m_data.connections_hide.data() != theApp.m_general_data.connections_hide.data());
+    bool d2d_turned_on = (theApp.m_taskbar_data.disable_d2d && !optionsDlg.m_tab2_dlg.m_data.disable_d2d);
 
     theApp.m_main_wnd_data = optionsDlg.m_tab1_dlg.m_data;
     theApp.m_taskbar_data = optionsDlg.m_tab2_dlg.m_data;
@@ -670,6 +713,13 @@ void CTrafficMonitorDlg::ApplySettings(COptionsDlg& optionsDlg)
     CGeneralSettingsDlg::CheckTaskbarDisplayItem();
 
     SetTextFont();
+
+    //打开了D2D渲染后自动开启“背景透明”并关闭“根据任务栏颜色自动设置背景色”
+    if (d2d_turned_on)
+    {
+        theApp.m_taskbar_data.SetTaskabrTransparent(true);
+        theApp.m_taskbar_data.auto_set_background_color = false;
+    }
 
     //CTaskBarDlg::SaveConfig();
     if (IsTaskbarWndValid())
@@ -1031,7 +1081,9 @@ HCURSOR CTrafficMonitorDlg::OnQueryDragIcon()
 //计算指定秒数的时间内Monitor定时器会触发的次数
 static int GetMonitorTimerCount(int second)
 {
-    return second * 1000 / theApp.m_general_data.monitor_time_span;
+    int count = second * 1000 / theApp.m_general_data.monitor_time_span;
+    if (count <= 0) count = 1;
+    return count;
 }
 
 
@@ -1168,7 +1220,6 @@ UINT CTrafficMonitorDlg::MonitorThreadCallback(LPVOID dwUser)
         info.Replace(_T("<%cnt%>"), CCommon::IntToString(pThis->m_restart_cnt));
         CCommon::WriteLog(info, theApp.m_log_path.c_str());
     }
-
 
     if (pThis->m_monitor_time_cnt % GetMonitorTimerCount(3) == GetMonitorTimerCount(3) - 1)
     {
@@ -1433,6 +1484,10 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
                 SetAlwaysOnTop();       //每5分钟执行一次设置窗口置顶
             }
         }
+        else
+        {
+            m_tool_tips.Pop();          //显示了右键菜单时，不显示鼠标提示
+        }
 
         if (m_timer_cnt % 30 == 26)     //每隔30秒钟检测一次窗口位置，当窗口位置发生变化时保存设置
         {
@@ -1570,10 +1625,10 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
                 theApp.SaveConfig();
                 restart_taskbar_dlg = true;
             }
-            bool is_taskbar_transparent{ CTaskbarDefaultStyle::IsTaskbarTransparent(theApp.m_taskbar_data) };
+            bool is_taskbar_transparent{ theApp.m_taskbar_data.IsTaskbarTransparent()};
             if (!is_taskbar_transparent)
             {
-                CTaskbarDefaultStyle::SetTaskabrTransparent(false, theApp.m_taskbar_data);
+                theApp.m_taskbar_data.SetTaskabrTransparent(false);
                 restart_taskbar_dlg = true;
             }
             if (restart_taskbar_dlg && IsTaskbarWndValid())
@@ -1651,9 +1706,9 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
             COLORREF color = ::GetPixel(m_desktop_dc, pointx, pointy);        //取任务栏窗口左侧1像素处的颜色作为背景色
             if (!CCommon::IsColorSimilar(color, theApp.m_taskbar_data.back_color) && (/*CWindowsSettingHelper::IsWindows10LightTheme() ||*/ color != 0))
             {
-                bool is_taskbar_transparent{ CTaskbarDefaultStyle::IsTaskbarTransparent(theApp.m_taskbar_data) };
+                bool is_taskbar_transparent{ theApp.m_taskbar_data.IsTaskbarTransparent()};
                 theApp.m_taskbar_data.back_color = color;
-                CTaskbarDefaultStyle::SetTaskabrTransparent(is_taskbar_transparent, theApp.m_taskbar_data);
+                theApp.m_taskbar_data.SetTaskabrTransparent(is_taskbar_transparent);
                 if (is_taskbar_transparent)
                     m_tBarDlg->ApplyWindowTransparentColor();
             }
@@ -1723,9 +1778,11 @@ void CTrafficMonitorDlg::OnRButtonUp(UINT nFlags, CPoint point)
 {
     // TODO: 在此添加消息处理程序代码和/或调用默认值
     CheckClickedItem(point);
-    if (m_clicked_item.is_plugin && m_clicked_item.plugin_item != nullptr)
+    bool is_plugin_item_clicked = (m_clicked_item.is_plugin && m_clicked_item.plugin_item != nullptr);
+    ITMPlugin* plugin{};
+    if (is_plugin_item_clicked)
     {
-        ITMPlugin* plugin = theApp.m_plugins.GetPluginByItem(m_clicked_item.plugin_item);
+        plugin = theApp.m_plugins.GetPluginByItem(m_clicked_item.plugin_item);
         if (plugin != nullptr && plugin->GetAPIVersion() >= 3)
         {
             if (m_clicked_item.plugin_item->OnMouseEvent(IPluginItem::MT_RCLICKED, point.x, point.y, (void*)GetSafeHwnd(), 0) != 0)
@@ -1733,7 +1790,7 @@ void CTrafficMonitorDlg::OnRButtonUp(UINT nFlags, CPoint point)
         }
     }
     //设置点击鼠标右键弹出菜单
-    CMenu* pContextMenu = theApp.m_main_menu.GetSubMenu(0); //获取第一个弹出菜单，所以第一个菜单必须有子菜单
+    CMenu* pContextMenu = (is_plugin_item_clicked ? theApp.m_main_menu_plugin.GetSubMenu(0) : theApp.m_main_menu.GetSubMenu(0));
     CPoint point1;  //定义一个用于确定光标位置的位置
     GetCursorPos(&point1);  //获取当前光标的位置，以便使得菜单可以跟随光标
     //设置默认菜单项
@@ -1758,6 +1815,22 @@ void CTrafficMonitorDlg::OnRButtonUp(UINT nFlags, CPoint point)
         pContextMenu->SetDefaultItem(-1);
         break;
     }
+
+    if (plugin != nullptr)
+    {
+        //将右键菜单中插件菜单的显示文本改为插件名
+        pContextMenu->ModifyMenu(17, MF_BYPOSITION, 17, plugin->GetInfo(ITMPlugin::TMI_NAME));
+        //获取插件图标
+        HICON plugin_icon{};
+        if (plugin->GetAPIVersion() >= 5)
+            plugin_icon = (HICON)plugin->GetPluginIcon();
+        //设置插件图标
+        if (plugin_icon != nullptr)
+            CMenuIcon::AddIconToMenuItem(pContextMenu->GetSafeHmenu(), 17, TRUE, plugin_icon);
+    }
+    //更新插件子菜单
+    theApp.UpdatePluginMenu(&theApp.m_main_menu_plugin_sub_menu, plugin);
+
     pContextMenu->TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point1.x, point1.y, this); //在指定位置显示弹出菜单
 
     CDialog::OnRButtonUp(nFlags, point1);
@@ -1908,6 +1981,20 @@ BOOL CTrafficMonitorDlg::OnCommand(WPARAM wParam, LPARAM lParam)
         CTest::TestCommand();
     }
 #endif // DEBUG
+    //选择了插件命令
+    if (uMsg >= ID_PLUGIN_COMMAND_START && uMsg <= ID_PLUGIN_COMMAND_MAX)
+    {
+        int index = uMsg - ID_PLUGIN_COMMAND_START;
+        if (m_clicked_item.is_plugin && m_clicked_item.plugin_item != nullptr)
+        {
+            ITMPlugin* plugin = theApp.m_plugins.GetPluginByItem(m_clicked_item.plugin_item);
+            if (plugin != nullptr && plugin->GetAPIVersion() >= 5)
+            {
+                plugin->OnPluginCommand(index, (void*)GetSafeHwnd(), nullptr);
+            }
+        }
+    }
+
 
     return CDialog::OnCommand(wParam, lParam);
     }
@@ -1929,8 +2016,8 @@ void CTrafficMonitorDlg::OnInitMenu(CMenu* pMenu)
     pMenu->CheckMenuItem(ID_ALOW_OUT_OF_BORDER, MF_BYCOMMAND | (theApp.m_main_wnd_data.m_alow_out_of_border ? MF_CHECKED : MF_UNCHECKED));
 
     //设置“选择连接”子菜单项中各单选项的选择状态
-    CMenu* select_connection_menu = theApp.m_main_menu.GetSubMenu(0)->GetSubMenu(0);
-    SetConnectionMenuState(select_connection_menu);
+    SetConnectionMenuState(theApp.m_main_menu.GetSubMenu(0)->GetSubMenu(0));
+    SetConnectionMenuState(theApp.m_main_menu_plugin.GetSubMenu(0)->GetSubMenu(0));
 
     //设置“窗口不透明度”子菜单下各单选项的选择状态
     switch (theApp.m_cfg_data.m_transparency)
@@ -1950,6 +2037,17 @@ void CTrafficMonitorDlg::OnInitMenu(CMenu* pMenu)
     pMenu->EnableMenuItem(ID_SELECT_ALL_CONNECTION, MF_BYCOMMAND | (theApp.m_general_data.show_all_interface ? MF_GRAYED : MF_ENABLED));
 
     pMenu->EnableMenuItem(ID_CHECK_UPDATE, MF_BYCOMMAND | (theApp.IsCheckingForUpdate() ? MF_GRAYED : MF_ENABLED));
+
+    //设置插件命令的勾选状态
+    ITMPlugin* plugin = theApp.m_plugins.GetPluginByItem(m_clicked_item.plugin_item);
+    if (plugin != nullptr && plugin->GetAPIVersion() >= 5)
+    {
+        for (int i = ID_PLUGIN_COMMAND_START; i <= ID_PLUGIN_COMMAND_MAX; i++)
+        {
+            bool checked = (plugin->IsCommandChecked(i) != 0);
+            pMenu->CheckMenuItem(i, MF_BYCOMMAND | (checked ? MF_CHECKED : MF_UNCHECKED));
+        }
+    }
 
     //pMenu->SetDefaultItem(ID_NETWORK_INFO);
 }
@@ -2386,7 +2484,6 @@ void CTrafficMonitorDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
 
 void CTrafficMonitorDlg::OnOptions()
 {
-    // TODO: 在此添加命令处理程序代码
     _OnOptions(0);
 }
 
@@ -2394,26 +2491,6 @@ void CTrafficMonitorDlg::OnOptions()
 //通过任务栏窗口的右键菜单打开“选项”对话框
 void CTrafficMonitorDlg::OnOptions2()
 {
-    // TODO: 在此添加命令处理程序代码
-    //判断任务栏窗口中点击的项目是否是插件项目
-    if (IsTaskbarWndValid() && m_tBarDlg->GetClickedItem().is_plugin)
-    {
-        //找到对应的插件
-        ITMPlugin* plugin = theApp.m_plugins.GetPluginByItem(m_tBarDlg->GetClickedItem().plugin_item);
-        if (plugin != nullptr)
-        {
-            //显示插件的选项设置
-            auto rtn = plugin->ShowOptionsDialog(GetSafeHwnd());
-            if (rtn == ITMPlugin::OR_OPTION_CHANGED)    //选项设置有更改，重新打开任务栏窗口
-            {
-                CloseTaskBarWnd();
-                OpenTaskBarWnd();
-            }
-            if (rtn != ITMPlugin::OR_OPTION_NOT_PROVIDED)
-                return;
-        }
-    }
-
     _OnOptions(1);
 }
 
@@ -2465,8 +2542,8 @@ void CTrafficMonitorDlg::OnCheckUpdate()
 afx_msg LRESULT CTrafficMonitorDlg::OnTaskbarMenuPopedUp(WPARAM wParam, LPARAM lParam)
 {
     //设置“选择连接”子菜单项中各单选项的选择状态
-    CMenu* select_connection_menu = theApp.m_taskbar_menu.GetSubMenu(0)->GetSubMenu(0);
-    SetConnectionMenuState(select_connection_menu);
+    SetConnectionMenuState(theApp.m_taskbar_menu.GetSubMenu(0)->GetSubMenu(0));
+    SetConnectionMenuState(theApp.m_taskbar_menu_plugin.GetSubMenu(0)->GetSubMenu(0));
     return 0;
 }
 
@@ -2667,4 +2744,82 @@ void CTrafficMonitorDlg::OnRefreshConnectionList()
 {
     IniConnection();
 
+}
+
+
+afx_msg LRESULT CTrafficMonitorDlg::OnTabletQuerysystemgesturestatus(WPARAM wParam, LPARAM lParam)
+{
+    return 0;
+}
+
+
+void CTrafficMonitorDlg::OnPluginOptions()
+{
+    if (m_clicked_item.is_plugin)
+    {
+        //找到对应的插件
+        ITMPlugin* plugin = theApp.m_plugins.GetPluginByItem(m_clicked_item.plugin_item);
+        if (plugin != nullptr)
+        {
+            //显示插件的选项设置
+            auto rtn = plugin->ShowOptionsDialog(GetSafeHwnd());
+            if (rtn == ITMPlugin::OR_OPTION_NOT_PROVIDED)
+                MessageBox(CCommon::LoadText(IDS_PLUGIN_NO_OPTIONS_INFO), nullptr, MB_ICONINFORMATION | MB_OK);
+        }
+    }
+}
+
+
+void CTrafficMonitorDlg::OnPluginDetail()
+{
+    if (m_clicked_item.is_plugin)
+    {
+        //找到对应的插件
+        ITMPlugin* plugin = theApp.m_plugins.GetPluginByItem(m_clicked_item.plugin_item);
+        if (plugin != nullptr)
+        {
+            int index = theApp.m_plugins.GetPluginIndex(plugin);
+            CPluginInfoDlg dlg(index);
+            dlg.DoModal();
+        }
+    }
+}
+
+
+void CTrafficMonitorDlg::OnPluginOptionsTaksbar()
+{
+    //判断任务栏窗口中点击的项目是否是插件项目
+    if (IsTaskbarWndValid() && m_tBarDlg->GetClickedItem().is_plugin)
+    {
+        //找到对应的插件
+        ITMPlugin* plugin = theApp.m_plugins.GetPluginByItem(m_tBarDlg->GetClickedItem().plugin_item);
+        if (plugin != nullptr)
+        {
+            //显示插件的选项设置
+            auto rtn = plugin->ShowOptionsDialog(GetSafeHwnd());
+            if (rtn == ITMPlugin::OR_OPTION_CHANGED)    //选项设置有更改，重新打开任务栏窗口
+            {
+                CloseTaskBarWnd();
+                OpenTaskBarWnd();
+            }
+            if (rtn == ITMPlugin::OR_OPTION_NOT_PROVIDED)
+                MessageBox(CCommon::LoadText(IDS_PLUGIN_NO_OPTIONS_INFO), nullptr, MB_ICONINFORMATION | MB_OK);
+        }
+    }
+}
+
+
+void CTrafficMonitorDlg::OnPluginDetailTaksbar()
+{
+    if (IsTaskbarWndValid() && m_tBarDlg->GetClickedItem().is_plugin)
+    {
+        //找到对应的插件
+        ITMPlugin* plugin = theApp.m_plugins.GetPluginByItem(m_tBarDlg->GetClickedItem().plugin_item);
+        if (plugin != nullptr)
+        {
+            int index = theApp.m_plugins.GetPluginIndex(plugin);
+            CPluginInfoDlg dlg(index);
+            dlg.DoModal();
+        }
+    }
 }
